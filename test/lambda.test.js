@@ -76,4 +76,7 @@ describe('lambda tests', function() {
     task.config({ foo: 'bar'})
     assert.deepEqual(task.config(), {foo: 'bar'});
   });
+
+  it('works with tasks dependencies');
+
 });
