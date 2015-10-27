@@ -11,11 +11,14 @@
   "dependencies": {
     "aws-sdk": "~2.2.10",
     "glob-github": "~1.0.0",
+    "glob-parse": "0.0.1",
     "identify-github-event": "~1.0.0",
     "markdown-styles": "~3.1.2",
+    "mkdirp": "~0.5.1",
     "orchestrator": "~0.3.7",
     "pipe-iterators": "~1.1.0",
-    "wildglob": "0.0.2"
+    "wildglob": "~0.1.0",
+    "xtend": "~4.0.0"
   },
   "devDependencies": {
     "file-fixture": "0.0.2"

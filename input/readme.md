@@ -6,7 +6,8 @@ Automatic static site generation on `git push` using AWS Lambda.
 
 - automatically rebuilds your markdown files stored on Github repos in response to a git push using AWS Lambda.
 - includes a full tutorial on how to set up the rebuild, assuming you are already using S3 for static site hosting
-- you can use a single AWS Lambda function to process all of your Github repos by configuring the files to process and the layout to use for each repo.
+- you can use a single AWS Lambda function to process all of your Github repos; tasks are matched against a repo + branch + filename glob expression and are easily extensible via the API
+- features an API inspired by the the Gulp build system: tasks, input streams and stream transformations are used to express the tasks to be done on each repo + branch
 - efficient: only downloads files matching a specific glob pattern on a specific branch rather than cloning the whole repo on each rebuild
 
 ## Installation
@@ -116,9 +117,7 @@ Get the code: `git clone ...`
 
 Edit `config.js`:
 
-Can I change this more into gulp style?
-
-```
+```js
 var lambda = require('markdown-styles-lambda').create();
 
 lambda.config('s3', {
@@ -134,7 +133,7 @@ lamdba.task('mixu/singlepageapp#master', function(task) {
   // generate markdown
   task.github('/input/*.md')
       .pipe(task.generateMarkdown({
-        layout: __dirname + '/layout'
+        layout: 'github'
       }))
       .pipe(task.s3('s3://bucket/path'));
 
@@ -146,34 +145,6 @@ lamdba.task('mixu/singlepageapp#master', function(task) {
 if (lambda.identifyGithubEvent(event.Records[0].Sns.Message) === 'PushEvent') {
   lambda.exec(event.Records[0].Sns.Message, context);
 }
-```
-
-```
-{
-  AWS: {
-    config: {
-      region: '',
-    },
-  },
-  github: {
-    type: 'oauth',
-    token: '',
-  },
-  builds: [
-    {
-      user: '',
-      repo: '',
-      markdown: [
-        [ '/input/*.md', 's3://bucket/path']
-      ],
-      copy: [
-        [ '/input/**/*.png', 's3://bucket/path/img']
-      ],
-      layout: 'github',
-    }
-  ]
-}
-
 ```
 
 Configuration properties:
@@ -239,6 +210,83 @@ Since there are three systems involved in invoking the lambda, there are three d
 5. Open the most recent log stream.
 6. Verify that the event was received from GitHub.
 
+# API
+
+`markdown-styles-lambda` uses a Gulp-style API, which means it is configured by writing short tasks using code. I considered a JSON-based format, but it would never be as flexible as code.
+
+The API has three kinds of functions:
+
+- input stream functions (`task.github(glob)` and `task.fromFs(glob)`): these return readable streams that can be `.pipe()`d into other streams
+- transform stream functions (`task.generateMarkdown(opts)`): these modify the objects returned from input streams, then pass the modified objects along and can be `pipe()`d into other streams
+- output stream functions (`task.s3(target)`, `task.toFs(path)`): these functions take the `.path` value, and write it to S3 or to the filesystem
+
+Note that because we are streaming the files, they never touch the disk on the machine running Lambda. Instead, every file is represented by an object that looks like this:
+
+- `path`
+  - for github, an absolute path starting from the base of the github repo
+  - for fromfs, an absolute path (after removing the base of the glob)
+- `stat` (the fs.stat object associated with the input file),
+- `contents` (a string with the content of the input file).
+
+Note that the file paths are always "abstract" in that they are relative to the root of the repository rather than paths to real files on disk.
+
+## Input stream functions
+
+The two input functions return objects with these properties. Note that `stat` is not populated for the Github input stream function.
+
+- `task.github(glob)`: returns objects with `path`, `stat` and `contents`; `path` is always relative to the root of the Github repository
+- `task.fromFs(glob, opts)`: returns objects with `path`, `stat` and `contents`; you can set the root of the paths by passing `opts.root`. `root` is stripped out of file paths after the files have been read, so things will work as if you are working on a Github repo that is in the `root` directory. This is useful for local testing.
+
+## Transform stream functions
+
+The main transform stream function is `task.generateMarkdown(opts)`:
+
+- converts `contents` from markdown to HTML; changes the extension of the file to .html
+- accepts the following options:
+  - `opts.asset-path`: the path to the assets folder, relative to the output URL
+  - `opts.meta`: a JSON hash that has the contents of the `meta.json` file to merge in
+  - `opts.layout`: name of a builtin layout or an absolute path to a layout
+  - `opts.highlight-extension`: a string that specifies the name of a highlighter module or an absolute path to a highlighter module for `extension`, e.g. `--highlight-csv /foo/highlight-csv`.
+
+Keep in mind that you can copy files by reading them from Github and then writing the directly to S3 without transforming them in any way.
+
+If you want to change the path of the files, you can change the `path` property on the file objects.
+
+There are four different cases:
+
+- base to base
+  - `/` git path
+  - `/assets` asset path
+  - `http://example.com/` output URL
+- base to subdir
+  - `/` git path
+  - replace `/` with `/sub` after `task.github()`
+  - `/assets` asset path
+  - `http://example.com/sub` output URL
+- subdir to base
+  - `/sub` git path
+  - replace `/sub` with `/` after `task.github`
+  - `/assets` asset path
+  - `http://example.com/` output URL
+- subdir to subdir
+  - `/sub` git path
+  - replace `/sub` with `/other` after `task.github`
+  - `/assets` asset path
+  - `http://example.com/other` output URL
+
+
+## Output stream functions
+
+Finally, the output stream functions
+
+- `task.toFs(path)`
+- `task.s3(target)`
+  - simply prepends the target path to `item.path` and saves the file
+
+# Cases
+
+- weird asset path
+  - set `asset-path` to the asset folder location relative to the root of the output domain
 
 ## Automate maybe???
 
