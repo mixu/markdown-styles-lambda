@@ -1,6 +1,7 @@
 var assert = require('assert');
 var url = require('url');
 var Lambda = require('../lib/lambda');
+var Task = require('../lib/task');
 
 function pushEvent(target) {
   var parts = url.parse('fake://' + target);
@@ -61,8 +62,18 @@ describe('lambda tests', function() {
     });
   });
 
-  it('.config() intercepts and merges input on .github and .s3', function() {
+  it('task constructor intercepts and merges input on .github and .s3', function() {
+    var opts = {
+      s3: { region: 'foo' },
+      github: { type: 'oauth', token: '' },
+    };
+    var task = new Task({ config: opts });
 
+    assert.deepEqual(task.config(), opts);
+    var opts2 = { s3: 'foo', github: opts.github };
+    task.config('s3', 'foo')
+    assert.deepEqual(task.config(), opts2);
+    task.config({ foo: 'bar'})
+    assert.deepEqual(task.config(), {foo: 'bar'});
   });
-
 });

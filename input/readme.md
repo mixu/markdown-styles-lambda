@@ -120,10 +120,12 @@ Edit `config.js`:
 ```js
 var lambda = require('markdown-styles-lambda').create();
 
+// http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html#constructor-property
 lambda.config('s3', {
   region: ''
 });
 
+// http://mikedeboer.github.io/node-github/#Client.prototype.authenticate
 lambda.config('github', {
   type: 'oauth',
   token: '',

@@ -30,12 +30,12 @@ describe('task tests', function() {
     var out = fixture.dirname();
 
     // copy images from /input
-    var task = new Task(conf);
+    var task = new Task({ config: conf });
    task.fromFs(tmpdir + '/**/*.png')
         .pipe(task.toFs(out))
         .once('finish', function() {
-          console.log(md5(out + '/1.png'));
-          console.log(md5(out + '/sub/2.png'));
+          assert.equal(md5(out + '/1.png'), '78805a221a988e79ef3f42d7c5bfd418');
+          assert.equal(md5(out + '/sub/2.png'), '78805a221a988e79ef3f42d7c5bfd418');
           done();
         });
   });
@@ -56,12 +56,11 @@ describe('task tests', function() {
       }))
       .pipe(task.toFs(out))
       .once('finish', function() {
-        console.log(md5(out + '/foo.html'));
-        console.log(md5(out + '/bar/baz.html'));
+        // md5's differ due to asset paths
+        assert.equal(md5(out + '/foo.html'), '5849e4bcda8f53c1d9060f4c93e9f076');
+        assert.equal(md5(out + '/bar/baz.html'), '05120429b8adf353ceeec87915cab669');
         done();
       });
-
-
   });
 
 });
