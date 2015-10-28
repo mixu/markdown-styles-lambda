@@ -113,19 +113,17 @@ Copy the topic ARN for later use.
 
 ### Set up the code
 
-Get the code: `git clone ...`
+To write your tasks, you should create new folder and `npm install markdown-styles-lambda`.
 
-Edit `config.js`:
+Next, create a file called `index.js`. You can get started by using the example below:
 
 ```js
 var lambda = require('markdown-styles-lambda').create();
 
-// http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html#constructor-property
 lambda.config('s3', {
   region: ''
 });
 
-// http://mikedeboer.github.io/node-github/#Client.prototype.authenticate
 lambda.config('github', {
   type: 'oauth',
   token: '',
@@ -133,14 +131,16 @@ lambda.config('github', {
 
 lamdba.task('mixu/singlepageapp#master', function(task) {
   // generate markdown
-  task.github('/input/*.md')
+  return task.github('/input/*.md')
       .pipe(task.generateMarkdown({
         layout: 'github'
       }))
       .pipe(task.s3('s3://bucket/path'));
+});
 
+lamdba.task('mixu/singlepageapp#master', function(task) {
   // copy images from /input
-  task.github('/input/**/*.png')
+  return task.github('/input/**/*.png')
       .pipe(task.s3('s3://bucket/path'));
 });
 
@@ -149,22 +149,176 @@ if (lambda.identifyGithubEvent(event.Records[0].Sns.Message) === 'PushEvent') {
 }
 ```
 
-Configuration properties:
+As you can see in the example above, `markdown-styles-lambda` uses a Gulp-style API, which means it is configured by writing short tasks using code. I considered a JSON-based format, but it would never be as flexible as code.
 
-- `AWS.config`: any values that are not empty will be set on [`AWS.config`](http://docs.aws.amazon.com/AWSJavaScriptSDK/guide/node-configuring.html). You'll want to set the region property to match the region of your S3 bucket; the credentials are already set correctly when running a Lambda.
-- `github`: the values here will be passed to `github.authenticate`. Set the token to the oAuth token you obtained earlier.
-- `builds`: an array of build configurations. These are matched against the incoming SNS message using the `user` and `repo` values; every matching configuration is used to generate the markdown files. You can set multiple builds if you want to share the same `markdown-styles-lambda` across multiple Github repositories.
-  - `user`: your Github username
-  - `repo`: the name of the repo
-  - `markdown`: an array of markdown tasks; files matching these globs will be built using `markdown-styles`
-    - for example, to build all files in `input/*.md` and to write them using their paths relative to the github repo's root to `s3://bucket/path`, use `[ '/input/*.md', 's3://bucket/path']`
-  - `copy`: an array of copy tasks; files matching these globs will be simply copied over to S3
-    - for example, to copy all files in `input/**/*.png` to `s3://bucket/path/`, use `['input/**/*.png', 's3://bucket/path/']`
-  - `layout`: a name of a builtin layout or a path relative to the root of the repo to use for the `markdown-styles` tasks
+You start by configuring a set of tasks to be run when events from a specific repository arrive using `lambda.task(repo, fn)`. Next, you define operations to be executed on each repository using the Task API. Tasks have three kinds of functions:
+
+- input stream functions (`task.github(glob)` and `task.fromFs(glob)`): these return readable streams that can be `.pipe()`d into other streams
+- transform stream functions (`task.generateMarkdown(opts)`): these modify the objects returned from input streams, then pass the modified objects along and can be `pipe()`d into other streams
+- output stream functions (`task.s3(target)`, `task.toFs(path)`): these functions take the `.path` value, and write it to S3 or to the filesystem
+
+Note that because we are streaming the files, they never touch the disk on the machine running Lambda. Instead, every file is represented by an object with a couple of keys (`path`, `contents`, `stat`). See the full API docs below for more information.
+
+You can easily write your own tasks; they just need to be object mode streams that take a single object with the aforementioned keys and that change the keys in some way (convert the content to markdown, change the output path etc.). `pipe-iterators` provides a bunch of shortcuts for writing object mode streams.
+
+### TODO
+
+- glob-github fix
+- glob-github should support branches
+- markdown-styles fix
+- `task.github(glob, basepath)` should work
+- task [deps] should work
+- should be able to parse out the target from any github event in identify-github-event
+- task.s3 should set the contentType based on file exts so one can upload pngs and other files
+- wildglob should support an array of globs (!)
+
+### API - lambda
+
+- `lambda.create()`: easier-to-type equivalent to `new (require('markdown-styles-lambda'))()`. Start your app by running `lambda = require('markdown-styles-lambda').create();`
+
+#### lambda.config(key, hash)
+
+Sets configuration for a specific key. The supported keys are:
+
+- `s3`: the set of parameters passed to [`new AWS.S3()`](http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html#constructor-property).  You'll want to set the region property to match the region of your S3 bucket; the credentials are already set correctly when running a Lambda.
+- `github`: the set of parameters passed to [`github.authenticate()`](http://mikedeboer.github.io/node-github/#Client.prototype.authenticate). Set the token to the oAuth token you obtained earlier.
+
+Can also be called:
+
+- `lambda.config(hash)`: sets the configuration hash; the hash should have keys like `s3: {}` and `github: {}`
+- `lambda.config()`: returns the configuration hash
+
+#### lambda.task(repo, [deps], fn)
+
+Define a new task to be run against `repo`.
+
+- `repo` should be a string like `user/repo#branch-or-sha`)
+- `fn` can be:
+  - a synchronous function like `function(task) { ... }`
+    - that returns a stream `function(task) { return stream })`
+    - that returns a promise `function(task) { return promise })`
+  - an asynchronous function that takes a `onDone` callback (e.g. `function(err)`) like `function(task, onDone) { onDone(err); }`
+
+#### lambda.exec(event, onDone)
+
+Given a specific event, executes all tasks that match the event
+
+- `event` can be a Github PushEvent or a Github repo name like `user/repo#branch`
+- `onDone` can be a AWS context object or a function `function(err) { ... }` that is called on completion
+
+#### lambda.identifyGithubEvent(event)
+
+Returns the canonical, CamelCased name of a Github event given a JSON hash that is a Github event.
+
+### API - Task
+
+#### task properties
+
+`task.user`
+`task.repo`
+`task.branch`
+
+#### task.github(glob)
+
+Emits downloaded Github files matching the provided glob on the current repository. Returns a readable stream of file objects that can be [piped](https://nodejs.org/api/stream.html#stream_readable_pipe_destination_options) to plugins.
+
+The file objects have the following keys:
+
+- `path`
+  - for github, an absolute path starting from the base of the github repo
+  - for fromfs, an absolute path (after removing the base of the glob)
+- `stat` (the fs.stat object associated with the input file),
+- `contents` (a string with the content of the input file).
+
+
+Note that the file paths are always "abstract" in that they are relative to the root of the repository rather than paths to real files on disk.
+
+Note that paths are relative to the glob expression; everything before a glob starts is stripped out.
+
+You can safely start multiple `task.github()` calls at the same time against the same repo. They all share the same caching system, so concurrent tasks that fetch the same API endpoint will share the same response (rather than making extra calls against the API).
+
+To limit the number of directory traversal API calls needed, make sure you use a fairly specific glob expression. For example `input/*.md` is better than `**/*.md` because it only requires reading the `input/` directory's contents whereas `**/*.md` will require loading traversing all folders within the Github repository.
+
+- `task.github(glob, basepath)`: TODO
+
+for example to copy all files matching these globs, ...
+
+#### task.fromFs(glob)
+
+Emits files matching provided glob or an array of globs from the file system.
+
+- `task.fromFs(glob, basepath)`
+
+
+
+#### task.generateMarkdown(opts)
+
+Converts `contents` from markdown to HTML; changes the extension of the file to .html.
+
+Accepts the following options:
+
+- `layout`: a name of a builtin layout or a path relative to the root of the repo to use for the `markdown-styles` tasks
+- `asset-path`: the path to the assets folder, relative to the output URL
+- `meta`: a JSON hash that has the contents of the `meta.json` file to merge in
+- `layout`: name of a builtin layout or an absolute path to a layout
+- `highlight-extension`: a string that specifies the name of a highlighter module or an absolute path to a highlighter module for `extension`, e.g. `--highlight-csv /foo/highlight-csv`.
+
 
 If you want to user your own layout, just point the `layout` to a path relative to the root of the repo.
 
+for example, to build all files in `input/*.md` and to write them using their paths relative to the github repo's root to `s3://bucket/path`
+
+##### Using an alternative asset path
+
+- set `asset-path` to the asset folder location relative to the root of the output domain
+
+##### Copying the contents of an asset folder
+
+Example where you copy all of the assets from Github to S3.
+
+#### task.s3(target)
+
+Returns a writable stream that can be piped to and it will write files to S3.
+
+##### Renaming files
+
+If you want to change the path of the files, you can change the `path` property on the file objects.
+
+There are four different cases:
+
+- base to base
+  - `/` git path
+  - `/assets` asset path
+  - `http://example.com/` output URL
+- base to subdir
+  - `/` git path
+  - replace `/` with `/sub` after `task.github()`
+  - `/assets` asset path
+  - `http://example.com/sub` output URL
+- subdir to base
+  - `/sub` git path
+  - replace `/sub` with `/` after `task.github`
+  - `/assets` asset path
+  - `http://example.com/` output URL
+- subdir to subdir
+  - `/sub` git path
+  - replace `/sub` with `/other` after `task.github`
+  - `/assets` asset path
+  - `http://example.com/other` output URL
+
+
+#### task.toFs(prepend)
+
+Returns a writable stream that can be piped to and it will write files to the file system.
+
+
 Note that assets are not automatically uploaded. Run `make upload-assets` to upload the assets.
+
+### Testing your build
+
+- test runner bin
+- how to easily set AWS profile
+- how to programmatically set AWS profile
 
 Now, prepare the zip file for Lambda: `make` (if you are on Windows, just manually run `npm install` and then make a zip file from the root of the git repo).
 
@@ -214,23 +368,6 @@ Since there are three systems involved in invoking the lambda, there are three d
 
 # API
 
-`markdown-styles-lambda` uses a Gulp-style API, which means it is configured by writing short tasks using code. I considered a JSON-based format, but it would never be as flexible as code.
-
-The API has three kinds of functions:
-
-- input stream functions (`task.github(glob)` and `task.fromFs(glob)`): these return readable streams that can be `.pipe()`d into other streams
-- transform stream functions (`task.generateMarkdown(opts)`): these modify the objects returned from input streams, then pass the modified objects along and can be `pipe()`d into other streams
-- output stream functions (`task.s3(target)`, `task.toFs(path)`): these functions take the `.path` value, and write it to S3 or to the filesystem
-
-Note that because we are streaming the files, they never touch the disk on the machine running Lambda. Instead, every file is represented by an object that looks like this:
-
-- `path`
-  - for github, an absolute path starting from the base of the github repo
-  - for fromfs, an absolute path (after removing the base of the glob)
-- `stat` (the fs.stat object associated with the input file),
-- `contents` (a string with the content of the input file).
-
-Note that the file paths are always "abstract" in that they are relative to the root of the repository rather than paths to real files on disk.
 
 ## Input stream functions
 
@@ -241,40 +378,9 @@ The two input functions return objects with these properties. Note that `stat` i
 
 ## Transform stream functions
 
-The main transform stream function is `task.generateMarkdown(opts)`:
-
-- converts `contents` from markdown to HTML; changes the extension of the file to .html
-- accepts the following options:
-  - `opts.asset-path`: the path to the assets folder, relative to the output URL
-  - `opts.meta`: a JSON hash that has the contents of the `meta.json` file to merge in
-  - `opts.layout`: name of a builtin layout or an absolute path to a layout
-  - `opts.highlight-extension`: a string that specifies the name of a highlighter module or an absolute path to a highlighter module for `extension`, e.g. `--highlight-csv /foo/highlight-csv`.
 
 Keep in mind that you can copy files by reading them from Github and then writing the directly to S3 without transforming them in any way.
 
-If you want to change the path of the files, you can change the `path` property on the file objects.
-
-There are four different cases:
-
-- base to base
-  - `/` git path
-  - `/assets` asset path
-  - `http://example.com/` output URL
-- base to subdir
-  - `/` git path
-  - replace `/` with `/sub` after `task.github()`
-  - `/assets` asset path
-  - `http://example.com/sub` output URL
-- subdir to base
-  - `/sub` git path
-  - replace `/sub` with `/` after `task.github`
-  - `/assets` asset path
-  - `http://example.com/` output URL
-- subdir to subdir
-  - `/sub` git path
-  - replace `/sub` with `/other` after `task.github`
-  - `/assets` asset path
-  - `http://example.com/other` output URL
 
 
 ## Output stream functions
@@ -284,11 +390,6 @@ Finally, the output stream functions
 - `task.toFs(path)`
 - `task.s3(target)`
   - simply prepends the target path to `item.path` and saves the file
-
-# Cases
-
-- weird asset path
-  - set `asset-path` to the asset folder location relative to the root of the output domain
 
 ## Automate maybe???
 
