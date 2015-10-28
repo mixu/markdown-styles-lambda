@@ -81,4 +81,6 @@ describe('lambda tests', function() {
 
   it('can match and start multiple tasks at the same time');
 
+  it('task.s3 should set the contentType based on file exts so one can upload pngs and other files');
+
 });

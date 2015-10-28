@@ -163,14 +163,64 @@ You can easily write your own tasks; they just need to be object mode streams th
 
 ### TODO
 
-- glob-github fix
-- glob-github should support branches
-- markdown-styles fix
+- copying binary files: need to not clobber http reads. { encoding: null} should return raw buffers and other encoding values should return values with that encoding
 - `task.github(glob, basepath)` should work
 - task [deps] should work
-- should be able to parse out the target from any github event in identify-github-event
-- task.s3 should set the contentType based on file exts so one can upload pngs and other files
 - wildglob should support an array of globs (!)
+
+### Testing your build
+
+- test runner bin
+- how to easily set AWS profile
+- how to programmatically set AWS profile
+
+Now, prepare the zip file for Lambda: `make` (if you are on Windows, just manually run `npm install` and then make a zip file from the root of the git repo).
+
+
+### Create a Lambda Function
+
+1. Open [the AWS Lambda console](https://console.aws.amazon.com/lambda/home).
+2. Click on **“Create a Lambda function”**.
+3. Click on **"Upload a .ZIP file"**.
+
+ ![](./img/9-create-lambda.png)
+
+4. Set the **Role** to `lambda_s3_exec_role` (this adds the permission for S3)
+
+ ![](./img/10-set-role.png)
+
+5. Set the **Advanced settings**. 192 MB, 30 seconds recommended just in case, but typically I'm seeing about ~44MB used, and ~8 seconds; but this is network I/O and your files may be different).
+6. Click **“Create Lambda function”**.
+7. On the Lambda function list page, click the **“Actions”** dropdown then pick **“Add event source”**.
+
+ ![](./img/11-add-event-source.png)
+
+8. Select **“SNS”** as the event source type.
+9. Choose the SNS topic you created in Step 1, then click **“Submit”**. (Lambda will fill in the ARN for you.)
+
+## Testing your setup
+
+Since there are three systems involved in invoking the lambda, there are three different places where you can trigger an event: the lambda console, the SNS console and the Github webhook UI.
+
+### Testing from the Lambda console
+
+
+1. In the Lambda console functions list, make sure your GitHub bot function is selected, then choose “Edit/Test” from the Actions dropdown. Choose “SNS” as the sample event type, then click “Invoke” to test your function.
+
+### Testing from the SNS console
+
+2. In the AWS SNS console, open the “Topics” tab, select your GitHub publication topic, then use the “Other topic actions” to select “Delivery status”. Complete the wizard to set up CloudWatch Logs delivery confirmations, then press the “Publish to topic” button to send a test message to your topic (and from there to your Lambda function). You can then go to the CloudWatch Log console to view a confirmation of the delivery and (if everything is working correctly) also see it reflected in the CloudWatch events for your Lambda function and you Lambda function’s logs as well.
+
+### Testing from Github
+
+1. In the “Webhooks & Services” panel in your GitHub repository, click the “Test service” button.
+2. Open the AWS Lambda console.
+3. In the function list, under “CloudWatch metrics at a glance” for your function, click on any one of the “logs” links.
+4. Click on the timestamp column header to sort the log streams by time of last entry.
+5. Open the most recent log stream.
+6. Verify that the event was received from GitHub.
+
+# API
 
 ### API - lambda
 
@@ -203,7 +253,7 @@ Define a new task to be run against `repo`.
 
 Given a specific event, executes all tasks that match the event
 
-- `event` can be a Github PushEvent or a Github repo name like `user/repo#branch`
+- `event` can be a Github or a Github repo name like `user/repo#branch`. The event repo name, username and branch are parsed with [identify-github-event](https://github.com/mixu/identify-github-event) which should be able to handle any github event that has the necessary fields.
 - `onDone` can be a AWS context object or a function `function(err) { ... }` that is called on completion
 
 #### lambda.identifyGithubEvent(event)
@@ -282,7 +332,31 @@ Returns a writable stream that can be piped to and it will write files to S3.
 
 ##### Renaming files
 
+Rule #1: always rename files before converting them to markdown so that any asset paths are resolved correctly.
+
+Rule #2: all paths are relative to the root of the repository.
+
 If you want to change the path of the files, you can change the `path` property on the file objects.
+
+```js
+lambda.task('mixu/nwm', function(task) {
+  return task.github('/*.md')
+      .pipe(pi.map(function(file) {
+        // from /*.md -> /nwm/*.md
+        file.path = '/' + task.repo + file.path;
+        return file;
+      }))
+      .pipe(task.generateMarkdown({
+        layout: __dirname + '/layouts/readme',
+        // E.g. assets are located in __dirname/output/assets/
+        'asset-path': '/assets',
+      }))
+      // prepends __dirname/output/ to every incoming path
+      // e.g. output goes to __dirname/output/nwm/*.html
+      .pipe(task.toFs(__dirname + '/output/'));
+});
+```
+
 
 There are four different cases:
 
@@ -313,83 +387,6 @@ Returns a writable stream that can be piped to and it will write files to the fi
 
 
 Note that assets are not automatically uploaded. Run `make upload-assets` to upload the assets.
-
-### Testing your build
-
-- test runner bin
-- how to easily set AWS profile
-- how to programmatically set AWS profile
-
-Now, prepare the zip file for Lambda: `make` (if you are on Windows, just manually run `npm install` and then make a zip file from the root of the git repo).
-
-
-### Create a Lambda Function
-
-1. Open [the AWS Lambda console](https://console.aws.amazon.com/lambda/home).
-2. Click on **“Create a Lambda function”**.
-3. Click on **"Upload a .ZIP file"**.
-
- ![](./img/9-create-lambda.png)
-
-4. Set the **Role** to `lambda_s3_exec_role` (this adds the permission for S3)
-
- ![](./img/10-set-role.png)
-
-5. Set the **Advanced settings**. 192 MB, 30 seconds recommended just in case, but typically I'm seeing about ~44MB used, and ~8 seconds; but this is network I/O and your files may be different).
-6. Click **“Create Lambda function”**.
-7. On the Lambda function list page, click the **“Actions”** dropdown then pick **“Add event source”**.
-
- ![](./img/11-add-event-source.png)
-
-8. Select **“SNS”** as the event source type.
-9. Choose the SNS topic you created in Step 1, then click **“Submit”**. (Lambda will fill in the ARN for you.)
-
-## Testing your setup
-
-Since there are three systems involved in invoking the lambda, there are three different places where you can trigger an event: the lambda console, the SNS console and the Github webhook UI.
-
-### Testing from the Lambda console
-
-
-1. In the Lambda console functions list, make sure your GitHub bot function is selected, then choose “Edit/Test” from the Actions dropdown. Choose “SNS” as the sample event type, then click “Invoke” to test your function.
-
-### Testing from the SNS console
-
-2. In the AWS SNS console, open the “Topics” tab, select your GitHub publication topic, then use the “Other topic actions” to select “Delivery status”. Complete the wizard to set up CloudWatch Logs delivery confirmations, then press the “Publish to topic” button to send a test message to your topic (and from there to your Lambda function). You can then go to the CloudWatch Log console to view a confirmation of the delivery and (if everything is working correctly) also see it reflected in the CloudWatch events for your Lambda function and you Lambda function’s logs as well.
-
-### Testing from Github
-
-1. In the “Webhooks & Services” panel in your GitHub repository, click the “Test service” button.
-2. Open the AWS Lambda console.
-3. In the function list, under “CloudWatch metrics at a glance” for your function, click on any one of the “logs” links.
-4. Click on the timestamp column header to sort the log streams by time of last entry.
-5. Open the most recent log stream.
-6. Verify that the event was received from GitHub.
-
-# API
-
-
-## Input stream functions
-
-The two input functions return objects with these properties. Note that `stat` is not populated for the Github input stream function.
-
-- `task.github(glob)`: returns objects with `path`, `stat` and `contents`; `path` is always relative to the root of the Github repository
-- `task.fromFs(glob, opts)`: returns objects with `path`, `stat` and `contents`; you can set the root of the paths by passing `opts.root`. `root` is stripped out of file paths after the files have been read, so things will work as if you are working on a Github repo that is in the `root` directory. This is useful for local testing.
-
-## Transform stream functions
-
-
-Keep in mind that you can copy files by reading them from Github and then writing the directly to S3 without transforming them in any way.
-
-
-
-## Output stream functions
-
-Finally, the output stream functions
-
-- `task.toFs(path)`
-- `task.s3(target)`
-  - simply prepends the target path to `item.path` and saves the file
 
 ## Automate maybe???
 
