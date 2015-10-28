@@ -79,4 +79,6 @@ describe('lambda tests', function() {
 
   it('works with tasks dependencies');
 
+  it('can match and start multiple tasks at the same time');
+
 });

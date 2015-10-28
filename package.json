@@ -1,5 +1,5 @@
 {
-  "name": "lambda",
+  "name": "markdown-styles-lambda",
   "version": "1.0.0",
   "description": "",
   "main": "./lib/lambda.js",
@@ -10,18 +10,14 @@
   "license": "ISC",
   "dependencies": {
     "aws-sdk": "~2.2.10",
-    "cheerio": "~0.19.0",
-    "css": "~2.2.1",
     "glob-github": "~1.0.0",
     "glob-parse": "0.0.1",
-    "highlight.js": "~8.9.1",
     "identify-github-event": "~1.0.0",
     "markdown-styles": "~3.1.2",
-    "marked": "~0.3.5",
+    "miniq": "~1.0.0",
     "mkdirp": "~0.5.1",
     "orchestrator": "~0.3.7",
     "pipe-iterators": "~1.1.0",
-    "underscore": "~1.8.3",
     "wildglob": "~0.1.0",
     "xtend": "~4.0.0"
   },
