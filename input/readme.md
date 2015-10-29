@@ -33,7 +33,7 @@ Basically, whenever you push to your Github repo, we'll trigger a rebuild of the
 
 Once you've set up this pipeline, you can connect it to multiple Github repos! The same `markdown-styles-lambda` can process events from multiple Github repos - you can configure the layouts and target buckets to use for each repo separately.
 
-I am assuming that you are already using S3 for static site hosting. If you haven't set that up, you'll probably want to take a look at this Amazon tutorial first. Now, let's set this up!
+I am assuming that you are already using S3 for static site hosting. If you haven't set that up, you'll probably want to [take a look at this Amazon tutorial first](http://docs.aws.amazon.com/AmazonS3/latest/dev/WebsiteHosting.html). Now, let's set this up!
 
 ### Create an SNS Topic
 
@@ -121,12 +121,12 @@ Next, create a file called `index.js`. You can get started by using the example 
 var lambda = require('markdown-styles-lambda').create();
 
 lambda.config('s3', {
-  region: ''
+  region: 'YOUR S3 REGION HERE'
 });
 
 lambda.config('github', {
   type: 'oauth',
-  token: '',
+  token: 'YOUR GITHUB TOKEN HERE',
 });
 
 lamdba.task('mixu/cssbook - generate markdown', function(task) {
@@ -153,12 +153,12 @@ lambda.task('mixu/cssbook - copy non-markdown files', function(task) {
 exports.handler = lambda.snsHandler('PushEvent');
 ```
 
-As you can see in the example above, `markdown-styles-lambda` uses a Gulp-style API, which means it is configured by writing short tasks using code. I considered a JSON-based format, but it would never be as flexible as code.
+As you can see in the example above, `markdown-styles-lambda` uses a [Gulp-style API](http://gulpjs.com/), which means it is configured by writing short tasks using code. I considered a JSON-based format, but it would never be as flexible as code.
 
 Each task is defined using  `lambda.task(target, fn)`.
 
-- `target` is a string that specifies a target repo and a task name string separated by ` - `, e.g. `user/repo#branch - taskname`.
-- `fn` is a `function(task) { ... }` which is called when an event arrives from the repo specified in `target`
+- `target` is a string that specifies a target repo and a task name string separated by ` - `, e.g. `user/repo#branch - taskname`. The target repo and branch is parsed out and used to match against incoming SNS events.
+- `fn` is a `function(task) { ... }` that is called when an event arrives from the repo specified in `target`
 
 Each task receives a `task` object instance. The actual work is defined using the Task API. Tasks have three kinds of functions:
 
@@ -168,7 +168,7 @@ Each task receives a `task` object instance. The actual work is defined using th
 
 At the end of the file we are assigning `lambda.snsHandler('PushEvent')` to `exports.handler`. AWS will invoke this function when a Github SNS event arrives; it is a simple wrapper that calls `lambda.exec` to run the relevant tasks when a Github `PushEvent` is received.
 
-The built-in functions stream files directly from Github without writing them to disk. Instead, every file is represented by an object with a couple of keys (`path`, `contents`, `stat`). See the full API docs below for more information.
+The built-in functions stream files directly from Github without writing them to disk. Each file is represented by an object with a couple of keys (`path`, `contents`, `stat`). See the [full API docs](#api) below for more information.
 
 You can easily write your own tasks operations; they just need to be object mode streams that take a single object with the aforementioned keys and that change the keys in some way (convert the content to markdown, change the output path etc.). [`pipe-iterators`](https://github.com/mixu/pipe-iterators) provides a bunch of shortcuts for writing object mode streams.
 
@@ -245,19 +245,27 @@ Since there are three systems involved in invoking the lambda, there are three d
 ### Testing from the Lambda console
 
 
-1. In the Lambda console functions list, make sure your GitHub bot function is selected, then choose “Edit/Test” from the Actions dropdown. Choose “SNS” as the sample event type, then click “Invoke” to test your function.
+1. In the Lambda console functions list, make sure your lambda function is selected, then
+2. choose **“Edit/Test”** from the Actions dropdown.
+3. Choose **“SNS”** as the sample event type, then
+4. click **“Invoke”** to test your function.
 
 ### Testing from the SNS console
 
-2. In the AWS SNS console, open the “Topics” tab, select your GitHub publication topic, then use the “Other topic actions” to select “Delivery status”. Complete the wizard to set up CloudWatch Logs delivery confirmations, then press the “Publish to topic” button to send a test message to your topic (and from there to your Lambda function). You can then go to the CloudWatch Log console to view a confirmation of the delivery and (if everything is working correctly) also see it reflected in the CloudWatch events for your Lambda function and you Lambda function’s logs as well.
+1. In the AWS SNS console, open the **“Topics”* tab,
+2. select your **GitHub publication topic**, then
+3. use the **“Other topic actions”** to select **“Delivery status”**.
+4. Complete the wizard to set up CloudWatch Logs delivery confirmations, then press the **“Publish to topic”** button to send a test message to your topic (and from there to your Lambda function).
+
+You can then go to the CloudWatch Log console to view a confirmation of the delivery and (if everything is working correctly) also see it reflected in the CloudWatch events for your Lambda function and you Lambda function’s logs as well.
 
 ### Testing from Github
 
-1. In the “Webhooks & Services” panel in your GitHub repository, click the “Test service” button.
-2. Open the AWS Lambda console.
-3. In the function list, under “CloudWatch metrics at a glance” for your function, click on any one of the “logs” links.
-4. Click on the timestamp column header to sort the log streams by time of last entry.
-5. Open the most recent log stream.
+1. In the **“Webhooks & Services”** panel in your GitHub repository, click the **“Test service”** button.
+2. Open the **AWS Lambda console**.
+3. In the function list, under **“CloudWatch metrics at a glance”** for your function, click on any one of the **“logs”** links.
+4. Click on the **timestamp column header** to sort the log streams by time of last entry.
+5. Open the **most recent log stream**.
 6. Verify that the event was received from GitHub.
 
 # API
