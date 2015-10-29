@@ -129,8 +129,8 @@ lambda.config('github', {
   token: '',
 });
 
-lamdba.task('mixu/singlepageapp#master', function(task) {
-  // generate markdown
+lamdba.task('mixu/cssbook - generate markdown', function(task) {
+  // generate markdown from /input/*.md to /
   return task.github('/input/*.md')
       .pipe(task.generateMarkdown({
         layout: 'github'
@@ -138,44 +138,84 @@ lamdba.task('mixu/singlepageapp#master', function(task) {
       .pipe(task.s3('s3://bucket/path'));
 });
 
-lamdba.task('mixu/singlepageapp#master', function(task) {
-  // copy images from /input
-  return task.github('/input/**/*.png')
-      .pipe(task.s3('s3://bucket/path'));
+lambda.task('mixu/cssbook - copy assets', function(task) {
+  // copy /layout/assets/**/* to /assets
+  return task.github('/layout/assets/**/*', { buffer: false })
+             .pipe(task.s3('s3://bucket/path/assets'));
 });
 
-if (lambda.identifyGithubEvent(event.Records[0].Sns.Message) === 'PushEvent') {
-  lambda.exec(event.Records[0].Sns.Message, context);
-}
+lambda.task('mixu/cssbook - copy non-markdown files', function(task) {
+  // copy /input/**/*.!(md) to /
+  return task.github('/input/**/*.!(md)', { buffer: false })
+             .pipe(task.s3('s3://bucket/path'));
+})
+
+exports.handler = lambda.snsHandler('PushEvent');
 ```
 
 As you can see in the example above, `markdown-styles-lambda` uses a Gulp-style API, which means it is configured by writing short tasks using code. I considered a JSON-based format, but it would never be as flexible as code.
 
-You start by configuring a set of tasks to be run when events from a specific repository arrive using `lambda.task(repo, fn)`. Next, you define operations to be executed on each repository using the Task API. Tasks have three kinds of functions:
+Each task is defined using  `lambda.task(target, fn)`.
+
+- `target` is a string that specifies a target repo and a task name string separated by ` - `, e.g. `user/repo#branch - taskname`.
+- `fn` is a `function(task) { ... }` which is called when an event arrives from the repo specified in `target`
+
+Each task receives a `task` object instance. The actual work is defined using the Task API. Tasks have three kinds of functions:
 
 - input stream functions (`task.github(glob)` and `task.fromFs(glob)`): these return readable streams that can be `.pipe()`d into other streams
 - transform stream functions (`task.generateMarkdown(opts)`): these modify the objects returned from input streams, then pass the modified objects along and can be `pipe()`d into other streams
 - output stream functions (`task.s3(target)`, `task.toFs(path)`): these functions take the `.path` value, and write it to S3 or to the filesystem
 
-Note that because we are streaming the files, they never touch the disk on the machine running Lambda. Instead, every file is represented by an object with a couple of keys (`path`, `contents`, `stat`). See the full API docs below for more information.
+At the end of the file we are assigning `lambda.snsHandler('PushEvent')` to `exports.handler`. AWS will invoke this function when a Github SNS event arrives; it is a simple wrapper that calls `lambda.exec` to run the relevant tasks when a Github `PushEvent` is received.
 
-You can easily write your own tasks; they just need to be object mode streams that take a single object with the aforementioned keys and that change the keys in some way (convert the content to markdown, change the output path etc.). `pipe-iterators` provides a bunch of shortcuts for writing object mode streams.
+The built-in functions stream files directly from Github without writing them to disk. Instead, every file is represented by an object with a couple of keys (`path`, `contents`, `stat`). See the full API docs below for more information.
 
-### TODO
+You can easily write your own tasks operations; they just need to be object mode streams that take a single object with the aforementioned keys and that change the keys in some way (convert the content to markdown, change the output path etc.). [`pipe-iterators`](https://github.com/mixu/pipe-iterators) provides a bunch of shortcuts for writing object mode streams.
 
-- copying binary files: need to not clobber http reads. { encoding: null} should return raw buffers and other encoding values should return values with that encoding
-- `task.github(glob, basepath)` should work
-- task [deps] should work
-- wildglob should support an array of globs (!)
+### Testing your lambda locally
 
-### Testing your build
+The easiest way to test your lambda locally is to add the following line at the end of the file:
 
-- test runner bin
-- how to easily set AWS profile
-- how to programmatically set AWS profile
+```js
+lambda.exec(process.argv.slice(2));
+```
 
-Now, prepare the zip file for Lambda: `make` (if you are on Windows, just manually run `npm install` and then make a zip file from the root of the git repo).
+This allows you to use `node index.js <target>` to run your lambda tasks. If you run `node index.js` with no additional arguments, you will get a list of targets:
 
+```
+$ node index.js
+[markdown-styles-lambda] No tasks matched []
+[markdown-styles-lambda] Known targets:
+  mixu/cssbook#master
+  mixu/nodebook#master
+[markdown-styles-lambda] Known tasks:
+  mixu/cssbook - single page
+  mixu/nodebook - single page
+```
+
+You can specify either the name of a repo, e.g. `node index.js mixu/cssbook` to run all tasks specified on that repo, or you can run a specific task e.g. `node index.js 'mixu/cssbook - single page'`.
+
+**Setting your AWS profile from the CLI**. By default, `markdown-styles-lambda` will read your AWS default config since it uses [`aws-sdk`](http://docs.aws.amazon.com/AWSJavaScriptSDK/guide/node-configuring.html) to access S3. To quickly set your AWS profile, you can use `AWS_PROFILE=user2 node index.js <args>`.
+
+**Setting your AWS profile programmatically**. You can also programmatically set your AWS profile (after installing `aws-sdk` on your local machine).
+
+```js
+var AWS = require('aws-sdk');
+var credentials = new AWS.SharedIniFileCredentials({profile: 'user2'});
+lambda.config('s3', {
+  credentials: credentials
+});
+```
+
+### Create a zip file to upload
+
+Now, prepare a zip file for Lambda:
+
+```
+zip -r lambda.zip . -x "*.git*" "node_modules/aws-sdk/**"
+```
+
+If you are on Windows, just make a zip file from the root of the git repo. Remember that AWS Lambda function zip files should include your `node_modules` folder!
 
 ### Create a Lambda Function
 
@@ -222,7 +262,7 @@ Since there are three systems involved in invoking the lambda, there are three d
 
 # API
 
-### API - lambda
+### API - Lambda
 
 - `lambda.create()`: easier-to-type equivalent to `new (require('markdown-styles-lambda'))()`. Start your app by running `lambda = require('markdown-styles-lambda').create();`
 
@@ -233,79 +273,101 @@ Sets configuration for a specific key. The supported keys are:
 - `s3`: the set of parameters passed to [`new AWS.S3()`](http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html#constructor-property).  You'll want to set the region property to match the region of your S3 bucket; the credentials are already set correctly when running a Lambda.
 - `github`: the set of parameters passed to [`github.authenticate()`](http://mikedeboer.github.io/node-github/#Client.prototype.authenticate). Set the token to the oAuth token you obtained earlier.
 
-Can also be called:
+`lambda.config` can also be called with one or zero parameters:
 
 - `lambda.config(hash)`: sets the configuration hash; the hash should have keys like `s3: {}` and `github: {}`
 - `lambda.config()`: returns the configuration hash
 
-#### lambda.task(repo, [deps], fn)
+#### lambda.task(target, [deps], fn)
 
-Define a new task to be run against `repo`.
+Define a new task to be run against `target`.
 
-- `repo` should be a string like `user/repo#branch-or-sha`)
+- `target` can be:
+  - a string like `user/repo#branch-or-sha - task name`
+  - an array of target name strings
+- `deps` is an optional array of task names to be executed and completed before your task will run.
 - `fn` can be:
   - a synchronous function like `function(task) { ... }`
     - that returns a stream `function(task) { return stream })`
     - that returns a promise `function(task) { return promise })`
   - an asynchronous function that takes a `onDone` callback (e.g. `function(err)`) like `function(task, onDone) { onDone(err); }`
 
-#### lambda.exec(event, onDone)
+#### lambda.exec(event, [onDone])
 
 Given a specific event, executes all tasks that match the event
 
-- `event` can be a Github or a Github repo name like `user/repo#branch`. The event repo name, username and branch are parsed with [identify-github-event](https://github.com/mixu/identify-github-event) which should be able to handle any github event that has the necessary fields.
-- `onDone` can be a AWS context object or a function `function(err) { ... }` that is called on completion
+- `event` can be:
+  - a Github event. The event repo name, username and branch are parsed with [identify-github-event](https://github.com/mixu/identify-github-event) which should be able to handle any github event that has the necessary fields.
+  - a string
+    - which matches a Github repo in the form `user/repo#branch`; all tasks that are defined against that repo are run
+    - which matches a specific target string to run
+  - an array of strings that are repos or targets
+- `onDone` is an optional function to call after execution has been completed. It can be a AWS context object or a function `function(err) { ... }` that is called on completion
 
 #### lambda.identifyGithubEvent(event)
 
-Returns the canonical, CamelCased name of a Github event given a JSON hash that is a Github event.
+Returns the canonical, CamelCased name of a Github event given a JSON hash that is a Github event. The actual work is done by [identify-github-event](https://github.com/mixu/identify-github-event).
 
 ### API - Task
 
+Each lambda task receives an instance of `Task`. There is nothing particularly special about the task object: it is just a placeholder for some additional configuration properties and a convenient place to put a couple of methods; feel free to use it or just do your own thing when writing your own lambdas.
+
 #### task properties
 
-`task.user`
-`task.repo`
-`task.branch`
+Each task instance has several properties that may be useful:
 
-#### task.github(glob)
+- `task.user`: the username part of the current repo
+- `task.repo`: the repo name part of the current repo
+- `task.branch`: the current branch
+
+These are kind of smuggled into the builtin functions so that you don't need to repeat the username/repo/branch info when calling `task.*` functions.
+
+#### task.github(glob, [opts])
 
 Emits downloaded Github files matching the provided glob on the current repository. Returns a readable stream of file objects that can be [piped](https://nodejs.org/api/stream.html#stream_readable_pipe_destination_options) to plugins.
 
 The file objects have the following keys:
 
-- `path`
-  - for github, an absolute path starting from the base of the github repo
-  - for fromfs, an absolute path (after removing the base of the glob)
-- `stat` (the fs.stat object associated with the input file),
-- `contents` (a string with the content of the input file).
+- `path`: a path from the base of the glob expression to the matched file
+- `stat`: (the fs.stat object associated with the input file),
+- `contents`: (a string with the content of the input file).
 
+The `opts` hash can have the following properties:
 
-Note that the file paths are always "abstract" in that they are relative to the root of the repository rather than paths to real files on disk.
+- `base`: `file.path` is set to a path relative to the base of the glob expression. You can set `base` explicitly to `/` or some other path to get file paths that are relative to the root of the repo (`/`) or some other path.
+  For example, given the glob `/input/**/*.md`, the automatically detected base would be `/input`; e.g. `/input/foo.md` gets `file.path = '/foo.md'` and `/input/foo/bar.md` becomes `/foo/bar.md`.
+- `buffer`: If true (the default), `file.contents` is set to a string. If false, `file.contents` is set to a readable stream. This is useful for working with large files and/or binary files which should not be decoded as strings.
+- `read`: Setting this to false will return the Github file metadata object as `file.contents` and skip reading the file over HTTPS.
 
-Note that paths are relative to the glob expression; everything before a glob starts is stripped out.
-
-You can safely start multiple `task.github()` calls at the same time against the same repo. They all share the same caching system, so concurrent tasks that fetch the same API endpoint will share the same response (rather than making extra calls against the API).
+You can safely start multiple `task.github()` calls at the same time against the same repo. They all share the same in-memory-cache and request deduplicator logic, so concurrent tasks that fetch the same API endpoint will share the same response (rather than making extra calls against the API).
 
 To limit the number of directory traversal API calls needed, make sure you use a fairly specific glob expression. For example `input/*.md` is better than `**/*.md` because it only requires reading the `input/` directory's contents whereas `**/*.md` will require loading traversing all folders within the Github repository.
 
-- `task.github(glob, basepath)`: TODO
+Remember to set `{ buffer: false }` when copying (binary) files, e.g:
 
-for example to copy all files matching these globs, ...
+```js
+lambda.task('mixu/cssbook - copy assets', function(task) {
+  // copy /layout/assets/**/* to /assets
+  return task.github('/layout/assets/**/*', { buffer: false })
+             .pipe(task.s3('s3://bucket/path/assets'));
+});
+```
 
-#### task.fromFs(glob)
+#### task.fromFs(glob, [opts])
 
 Emits files matching provided glob or an array of globs from the file system.
 
-- `task.fromFs(glob, basepath)`
+The file objects have the following keys:
 
+- `path`: a path from the base of the glob expression to the matched file
+- `stat` (the fs.stat object associated with the input file),
+- `contents` (a string with the content of the input file).
 
+`opts` are the same as in `task.github`.
 
 #### task.generateMarkdown(opts)
 
-Converts `contents` from markdown to HTML; changes the extension of the file to .html.
-
-Accepts the following options:
+Calls [`markdown-styles`](https://github.com/mixu/markdown-styles) to generate HTML from markdown. Also changes the file `path` extension to `.html`. Accepts the following options (see [`markdown-styles`](https://github.com/mixu/markdown-styles) for more info):
 
 - `layout`: a name of a builtin layout or a path relative to the root of the repo to use for the `markdown-styles` tasks
 - `asset-path`: the path to the assets folder, relative to the output URL
@@ -313,30 +375,23 @@ Accepts the following options:
 - `layout`: name of a builtin layout or an absolute path to a layout
 - `highlight-extension`: a string that specifies the name of a highlighter module or an absolute path to a highlighter module for `extension`, e.g. `--highlight-csv /foo/highlight-csv`.
 
+Generally speaking you want to fully specified paths, such as:
 
-If you want to user your own layout, just point the `layout` to a path relative to the root of the repo.
+```js
+task.github('/input/*.md')
+    .pipe(task.generateMarkdown({
+      layout: __dirname + '/layout'
+    }))
+    .pipe(task.s3('s3://bucket/path'));
+```
 
-for example, to build all files in `input/*.md` and to write them using their paths relative to the github repo's root to `s3://bucket/path`
+##### Renaming files and using an alternative asset path
 
-##### Using an alternative asset path
+If you want to change the path of the files, you can change the `path` property on the file objects. Rule #1: always rename files before converting them to markdown so that any asset paths are resolved correctly.
 
-- set `asset-path` to the asset folder location relative to the root of the output domain
+`markdown-styles` assumes that your `/assets` folder is in the same folder as your markdown files. If you want to have your assets folder somewhere else, make sure you set `asset-path` to the asset folder location relative to the root of the output domain.
 
-##### Copying the contents of an asset folder
-
-Example where you copy all of the assets from Github to S3.
-
-#### task.s3(target)
-
-Returns a writable stream that can be piped to and it will write files to S3.
-
-##### Renaming files
-
-Rule #1: always rename files before converting them to markdown so that any asset paths are resolved correctly.
-
-Rule #2: all paths are relative to the root of the repository.
-
-If you want to change the path of the files, you can change the `path` property on the file objects.
+In the example below, I am renaming `readme.md` to `index.html`, and writing the readme from `/readme.md` in the Github repo to `/nwm/index.html` (e.g. `http://mixu.net/nwm/index.html`), with relative asset paths that go to `/assets` (`http://mixu.net/assets`).
 
 ```js
 lambda.task('mixu/nwm', function(task) {
@@ -348,64 +403,25 @@ lambda.task('mixu/nwm', function(task) {
       }))
       .pipe(task.generateMarkdown({
         layout: __dirname + '/layouts/readme',
-        // E.g. assets are located in __dirname/output/assets/
+        // E.g. assets are located in /assets
         'asset-path': '/assets',
       }))
-      // prepends __dirname/output/ to every incoming path
-      // e.g. output goes to __dirname/output/nwm/*.html
-      .pipe(task.toFs(__dirname + '/output/'));
+      // prepends s3://bucket/ to every incoming path
+      // e.g. output goes to s3://bucket/nwm/*.html
+      .pipe(task.s3('s3://bucket/'));
 });
 ```
 
+#### task.s3(target)
 
-There are four different cases:
+Returns a writable stream that can be piped to and it will write files to S3.
 
-- base to base
-  - `/` git path
-  - `/assets` asset path
-  - `http://example.com/` output URL
-- base to subdir
-  - `/` git path
-  - replace `/` with `/sub` after `task.github()`
-  - `/assets` asset path
-  - `http://example.com/sub` output URL
-- subdir to base
-  - `/sub` git path
-  - replace `/sub` with `/` after `task.github`
-  - `/assets` asset path
-  - `http://example.com/` output URL
-- subdir to subdir
-  - `/sub` git path
-  - replace `/sub` with `/other` after `task.github`
-  - `/assets` asset path
-  - `http://example.com/other` output URL
+`target` should be a string in the format `s3://bucket/path`, where `bucket` is the name of the S3 bucket and `path` is some path within the bucket.
 
+Since `.github() / .fromFs()` produce relative file paths, the final file path is produced by taking the value in `file.path` and prepending `target` to it.
 
-#### task.toFs(prepend)
+#### task.toFs(outdir)
 
-Returns a writable stream that can be piped to and it will write files to the file system.
+Returns a writable stream that can be piped to and it will write files to the file system. `outdir` is the output folder to write files to.
 
-
-Note that assets are not automatically uploaded. Run `make upload-assets` to upload the assets.
-
-## Automate maybe???
-
-```
-$ aws lambda create-function \
---region us-west-2 \
---function-name CreateThumbnail \
---zip-file fileb://file-path/CreateThumbnail.zip \
---role role-arn \
---handler CreateThumbnail.handler \
---runtime nodejs \
---profile adminuser \
---timeout 10 \
---memory-size 1024
-
-$ aws lambda update-function-configuration \
-   --function-name CreateThumbnail  \
-   --region us-west-2 \
-   --timeout timeout-in-seconds \
-   --profile adminuser
-```
-
+Since `.github() / .fromFs()` produce relative file paths, the final file path is produced by taking the value in `file.path` and prepending `outdir` to it.

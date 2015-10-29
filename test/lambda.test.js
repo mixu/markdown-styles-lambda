@@ -83,4 +83,14 @@ describe('lambda tests', function() {
 
   it('task.s3 should set the contentType based on file exts so one can upload pngs and other files');
 
+  it('task.github should accept { buffer: false }');
+  it('task.github should accept { read: false }');
+  it('task.github should accept { base: somebase }');
+  it('task.s3 should accept readable streams');
+
+  it('task.fromFs should accept { buffer: false }');
+  it('task.fromFs should accept { read: false }');
+  it('task.fromFs should accept { base: somebase }');
+  it('task.toFs should accept readable streams');
+
 });
