@@ -1,6 +1,6 @@
 # markdown-styles-lambda
 
-Automatic static site generation on `git push` using AWS Lambda.
+Automatic static site generation on `git push` using AWS Lambda and [markdown-styles](https://github.com/mixu/markdown-styles) using a Gulp-style API.
 
 ## Features
 
@@ -272,7 +272,9 @@ You can then go to the CloudWatch Log console to view a confirmation of the deli
 
 ### API - Lambda
 
-- `lambda.create()`: easier-to-type equivalent to `new (require('markdown-styles-lambda'))()`. Start your app by running `lambda = require('markdown-styles-lambda').create();`
+#### lambda.create()
+
+An easier-to-type equivalent to `new (require('markdown-styles-lambda'))()`. Start your app by running `lambda = require('markdown-styles-lambda').create();`
 
 #### lambda.config(key, hash)
 

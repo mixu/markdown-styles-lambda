@@ -1,13 +1,25 @@
 {
   "name": "markdown-styles-lambda",
   "version": "1.0.0",
-  "description": "",
+  "description": "Automatic static site generation on `git push` using AWS Lambda and markdown-styles using a Gulp-style API.",
   "main": "./lib/lambda.js",
   "scripts": {
     "test": "mocha --bail ./test/*.test.js"
   },
+  "keywords": [
+    "markdown",
+    "markup",
+    "html",
+    "documentation",
+    "docs",
+    "static",
+    "highlight",
+    "AWS",
+    "lambda",
+    "S3"
+  ],
   "author": "Mikito Takada <mikito.takada@gmail.com> (http://mixu.net/)",
-  "license": "ISC",
+  "license": "BSD-2-Clause",
   "dependencies": {
     "aws-sdk": "~2.2.12",
     "glob-github": "~1.2.0",
