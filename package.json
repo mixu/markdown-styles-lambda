@@ -15,7 +15,6 @@
     "identify-github-event": "~1.1.0",
     "markdown-styles": "~3.1.2",
     "mime-types": "~2.1.7",
-    "miniq": "~1.0.0",
     "mkdirp": "~0.5.1",
     "orchestrator": "~0.3.7",
     "pipe-iterators": "~1.2.0",
