@@ -31,7 +31,7 @@ describe('task tests', function() {
 
     // copy images from /input
     var task = new Task({ config: conf });
-   task.fromFs(tmpdir + '/**/*.png')
+   task.fromFs(tmpdir + '/**/*.png', { buffer: false })
         .pipe(task.toFs(out))
         .once('finish', function() {
           assert.equal(md5(out + '/1.png'), '78805a221a988e79ef3f42d7c5bfd418');

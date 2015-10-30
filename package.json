@@ -4,7 +4,7 @@
   "description": "",
   "main": "./lib/lambda.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "mocha --bail ./test/*.test.js"
   },
   "author": "Mikito Takada <mikito.takada@gmail.com> (http://mixu.net/)",
   "license": "ISC",

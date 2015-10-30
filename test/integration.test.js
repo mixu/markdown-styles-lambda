@@ -26,7 +26,7 @@ describe('integration tests', function() {
       'abc/bar/baz.md': '# Hello'
     });
     var task = new Task({});
-     task.fromFs(tmpdir + '/**/*.md', tmpdir + '/abc')
+     task.fromFs(tmpdir + '/**/*.md', { base: tmpdir + '/abc'})
           .pipe(pi.map(function(item) { return item.path; }))
           .pipe(pi.toArray(function(results) {
             assert.deepEqual(results, [ '/foo.md', '/bar/baz.md' ]);
@@ -40,7 +40,7 @@ describe('integration tests', function() {
       'abc/bar/baz.md': '# Hello'
     });
     var task = new Task({});
-     task.fromFs(tmpdir + '/**/*.md', tmpdir + '/abc/')
+     task.fromFs(tmpdir + '/**/*.md', { base: tmpdir + '/abc/' })
           .pipe(pi.map(function(item) { return item.path; }))
           .pipe(pi.toArray(function(results) {
             assert.deepEqual(results, [ '/foo.md', '/bar/baz.md' ]);
