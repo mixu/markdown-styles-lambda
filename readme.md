@@ -129,7 +129,7 @@ lambda.config('github', {
   token: 'YOUR GITHUB TOKEN HERE',
 });
 
-lamdba.task('mixu/cssbook - generate markdown', function(task) {
+lambda.task('mixu/cssbook - generate markdown', function(task) {
   // generate markdown from /input/*.md to /
   return task.github('/input/*.md')
       .pipe(task.generateMarkdown({
